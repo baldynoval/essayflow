@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { readSession } from '@/lib/auth/session';
-import { RUBRIC_PRESETS, getAIService, presetRubric, type RubricPresetId } from '@/lib/ai/ai-service';
+import { RUBRIC_PRESETS, getAIService, isAIProviderConfigured, presetRubric, type RubricPresetId } from '@/lib/ai/ai-service';
 
 export const runtime = 'nodejs';
 
@@ -26,8 +26,11 @@ export async function POST(request: Request) {
       instructions: typeof body.instructions === 'string' ? body.instructions : '',
       instruction,
     });
-    // Preset selection wins over the mock's inference so the UI stays predictable.
-    return NextResponse.json({ criteria: presetRubric(preset), note: result.note });
+    // With no real provider configured, the mock's output is deterministic and
+    // generic, so the preset's hand-tuned rubric is more useful to show — keep
+    // that fallback. Once AI_PROVIDER_API_KEY is set, use the model's own criteria.
+    const criteria = isAIProviderConfigured() ? result.criteria : presetRubric(preset);
+    return NextResponse.json({ criteria, note: result.note });
   } catch {
     return NextResponse.json({ error: 'AI gagal menyusun rubrik.' }, { status: 502 });
   }

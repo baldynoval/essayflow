@@ -1,14 +1,14 @@
-import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import { googleAuthUrl, isGoogleConfigured } from '@/lib/auth/google';
+import { googleRedirectUri, isGoogleConfigured } from '@/lib/auth/google';
 import { LOGIN_PATH } from '@/lib/auth/routes';
+import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
 /**
- * Starts the Google authorization flow.
- * Without configured credentials the user is returned to /login with a readable
- * message — no fake client id is generated.
+ * Starts the Google sign-in flow through Supabase.
+ * Without a configured Supabase project the user is returned to /login with a
+ * readable message — no fake redirect is generated.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -19,14 +19,17 @@ export async function GET(request: Request) {
     return NextResponse.redirect(back);
   }
 
-  const state = randomBytes(16).toString('hex');
-  const response = NextResponse.redirect(googleAuthUrl(url.origin, state));
-  response.cookies.set('essayflow_oauth_state', state, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 600,
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: googleRedirectUri(url.origin) },
   });
-  return response;
+
+  if (error || !data.url) {
+    const back = new URL(LOGIN_PATH, url.origin);
+    back.searchParams.set('error', 'google-belum-dikonfigurasi');
+    return NextResponse.redirect(back);
+  }
+
+  return NextResponse.redirect(data.url);
 }

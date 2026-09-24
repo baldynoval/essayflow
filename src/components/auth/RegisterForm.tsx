@@ -26,12 +26,36 @@ export function RegisterForm() {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setServerError(null);
     const next = validateCredentials({ email, password });
     setErrors(next);
-    if (Object.keys(next).length === 0 && name.trim()) setDone(true);
+    if (Object.keys(next).length > 0 || !name.trim() || submitting) return;
+
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, identity, email, password, role }),
+      });
+      const result = (await response.json()) as { ok: boolean; error?: string; needsEmailConfirmation?: boolean };
+      if (!result.ok) {
+        setServerError(result.error ?? 'Gagal mendaftar. Coba lagi.');
+        return;
+      }
+      setNeedsEmailConfirmation(Boolean(result.needsEmailConfirmation));
+      setDone(true);
+    } catch {
+      setServerError('Tidak dapat terhubung ke server. Periksa koneksi Anda.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -39,8 +63,15 @@ export function RegisterForm() {
       <SegmentedControl options={ROLE_OPTIONS} value={role} onChange={setRole} ariaLabel="Pilih peran" />
 
       {done && (
-        <Alert tone="success" className="mt-6" title="Pendaftaran diterima.">
-          Akun akan aktif setelah layanan otentikasi terhubung. Untuk sementara gunakan akun demo pada halaman Masuk.
+        <Alert tone="success" className="mt-6" title="Pendaftaran berhasil.">
+          {needsEmailConfirmation
+            ? 'Cek email Anda untuk mengonfirmasi akun sebelum masuk.'
+            : 'Akun Anda sudah aktif. Silakan masuk.'}
+        </Alert>
+      )}
+      {serverError && (
+        <Alert tone="danger" className="mt-6" title="Pendaftaran gagal.">
+          {serverError}
         </Alert>
       )}
 
@@ -71,8 +102,8 @@ export function RegisterForm() {
           hint="Minimal 8 karakter."
           required
         />
-        <Button type="submit" size="lg" fullWidth>
-          Daftar
+        <Button type="submit" size="lg" fullWidth disabled={submitting || done}>
+          {submitting ? 'Mendaftar…' : 'Daftar'}
         </Button>
       </form>
 

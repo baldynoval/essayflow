@@ -1,31 +1,18 @@
 /**
- * Google authentication configuration.
+ * Google sign-in via Supabase Auth.
  *
- * No credentials are invented here. When GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
- * are absent the provider reports itself as unavailable and the UI explains that
- * clearly instead of failing silently.
+ * Supabase (not this file) talks to Google directly — the actual Google Client
+ * ID/Secret are configured in the Supabase dashboard under
+ * Authentication → Providers → Google, not in this app's env vars.
+ * `isGoogleConfigured` only checks that Supabase itself is reachable; if the
+ * Google provider isn't enabled in Supabase, the callback route reports that
+ * error back to the user instead of failing silently.
  */
 
-const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
-
 export function isGoogleConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 }
 
 export function googleRedirectUri(origin: string): string {
   return process.env.GOOGLE_REDIRECT_URI ?? `${origin}/api/auth/google/callback`;
-}
-
-export function googleAuthUrl(origin: string, state: string): string {
-  const params = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID ?? '',
-    redirect_uri: googleRedirectUri(origin),
-    response_type: 'code',
-    scope: 'openid email profile',
-    access_type: 'offline',
-    include_granted_scopes: 'true',
-    prompt: 'select_account',
-    state,
-  });
-  return `${AUTH_ENDPOINT}?${params.toString()}`;
 }

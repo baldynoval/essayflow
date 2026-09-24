@@ -110,10 +110,83 @@ class MockAIService implements AIService {
   }
 }
 
+/**
+ * Real provider: Claude via the Anthropic Messages API. Prompts ask for JSON
+ * only; a malformed response is treated as a provider failure (the caller —
+ * the API route — turns that into a 502) rather than silently guessed at.
+ */
+class ClaudeAIService implements AIService {
+  private readonly model = 'claude-sonnet-4-6';
+
+  private async complete(prompt: string): Promise<unknown> {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': process.env.AI_PROVIDER_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 2000,
+        system: 'Balas HANYA dengan JSON valid, tanpa teks lain, tanpa markdown code fence.',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!response.ok) throw new Error(`AI provider merespons ${response.status}`);
+    const data = (await response.json()) as { content?: { type: string; text?: string }[] };
+    const text = data.content?.find((block) => block.type === 'text')?.text;
+    if (!text) throw new Error('AI provider tidak mengembalikan teks.');
+    const cleaned = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleaned);
+  }
+
+  async suggestRubric({ title, instructions, instruction }: { title: string; instructions: string; instruction?: string }) {
+    const prompt = `Anda membantu pengajar menyusun rubrik penilaian tugas akademik.
+Judul tugas: ${title}
+Instruksi tugas: ${instructions}
+${instruction ? `Arahan tambahan: ${instruction}` : ''}
+
+Susun 3-5 kriteria penilaian. Total bobot (weight) harus tepat 100.
+Balas JSON dengan bentuk persis:
+{"criteria":[{"id":"string singkat unik","name":"string","description":"string","weight":number}],"note":"catatan singkat 1-2 kalimat tentang rasionalisasi rubrik ini"}`;
+
+    const parsed = (await this.complete(prompt)) as RubricSuggestion;
+    if (!Array.isArray(parsed.criteria) || typeof parsed.note !== 'string') {
+      throw new Error('Format respons AI tidak sesuai.');
+    }
+    return parsed;
+  }
+
+  async evaluate({ answer, rubric, instruction }: { answer: string; rubric: RubricCriterion[]; instruction?: string }) {
+    const prompt = `Anda menilai jawaban tugas akademik mahasiswa berdasarkan rubrik berikut.
+Rubrik: ${JSON.stringify(rubric)}
+${instruction ? `Instruksi tugas: ${instruction}` : ''}
+
+Jawaban mahasiswa:
+"""
+${answer}
+"""
+
+Beri skor 0-100 untuk tiap kriteria rubrik (field "score" ditambahkan ke tiap kriteria, pertahankan id/name/weight/description aslinya),
+dan tulis feedback yang membangun dan spesifik terhadap jawaban ini (bukan generik).
+Balas JSON dengan bentuk persis:
+{"criteria":[{"id":"...","name":"...","description":"...","weight":number,"score":number}],"feedback":{"strengths":["..."],"improvements":["..."],"suggestions":["..."]},"score":number}
+"score" di level atas adalah skor akhir berbobot (0-100, boleh desimal satu angka).`;
+
+    const parsed = (await this.complete(prompt)) as EvaluationDraft;
+    if (!Array.isArray(parsed.criteria) || typeof parsed.score !== 'number' || !parsed.feedback) {
+      throw new Error('Format respons AI tidak sesuai.');
+    }
+    // Recompute from the weights ourselves rather than trust the model's arithmetic.
+    return { ...parsed, score: weightedScore(parsed.criteria) };
+  }
+}
+
 let instance: AIService | null = null;
 
 export function getAIService(): AIService {
-  if (!instance) instance = new MockAIService();
+  if (!instance) instance = isAIProviderConfigured() ? new ClaudeAIService() : new MockAIService();
   return instance;
 }
 
